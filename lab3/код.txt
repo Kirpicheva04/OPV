@@ -1,0 +1,167 @@
+#include <iostream>
+#include <thread>
+#include <future>
+#include <vector>
+#include <chrono>
+#include <atomic>
+#include <random>
+#include <windows.h>
+
+std::atomic<int> tasks_completed{ 0 };
+
+long long factorial(int n) {
+    long long result = 1;
+    for (int i = 2; i <= n; ++i) {
+        result *= i;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    tasks_completed++;
+    return result;
+}
+
+long long fibonacci(int n) {
+    if (n <= 1) return n;
+    long long a = 0, b = 1;
+    for (int i = 2; i <= n; ++i) {
+        long long temp = b;
+        b = a + b;
+        a = temp;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    tasks_completed++;
+    return b;
+}
+
+bool is_prime(int n) {
+    if (n <= 1) return false;
+    if (n <= 3) return true;
+    if (n % 2 == 0 || n % 3 == 0) return false;
+
+    for (int i = 5; i * i <= n; i += 6) {
+        if (n % i == 0 || n % (i + 2) == 0) return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    tasks_completed++;
+    return true;
+}
+
+int main() {
+    SetConsoleOutputCP(1251);
+    SetConsoleCP(1251);
+    setlocale(LC_ALL, "Russian");
+
+    const int N = 5;
+    std::cout << "Запуск " << N << " задач\n\n";
+
+    std::vector<std::future<long long>> long_futures;
+    std::vector<std::future<bool>> bool_futures;
+    std::vector<std::thread> threads;
+
+    std::vector<int> task_types;
+    std::vector<int> task_values;
+
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<> type_dis(0, 2);
+    std::uniform_int_distribution<> value_dis(5, 15);
+
+    for (int i = 0; i < N; ++i) {
+        int task_type = type_dis(gen);
+        int value = value_dis(gen);
+
+        task_types.push_back(task_type);
+        task_values.push_back(value);
+
+        if (task_type == 0) {
+            std::packaged_task<long long()> task(std::bind(factorial, value));
+            long_futures.push_back(task.get_future());
+            std::cout << "Задача " << i + 1 << ": факториал(" << value << ") запущена\n";
+            threads.push_back(std::thread(std::move(task)));
+        }
+        else if (task_type == 1) {
+            std::packaged_task<long long()> task(std::bind(fibonacci, value));
+            long_futures.push_back(task.get_future());
+            std::cout << "Задача " << i + 1 << ": Фибоначчи(" << value << ") запущена\n";
+            threads.push_back(std::thread(std::move(task)));
+        }
+        else {
+            std::packaged_task<bool()> task(std::bind(is_prime, value));
+            bool_futures.push_back(task.get_future());
+            std::cout << "Задача " << i + 1 << ": Простота(" << value << ") запущена\n";
+            threads.push_back(std::thread(std::move(task)));
+        }
+    }
+
+    std::cout << "\nВсе задачи запущены в отдельных потоках\n";
+    std::cout << "Ожидание результатов\n\n";
+
+    std::promise<void> completion_promise;
+    std::future<void> completion_future = completion_promise.get_future();
+
+    std::thread monitor_thread([&completion_promise]() {
+        std::cout << "Монитор: ожидание завершения всех задач\n";
+
+        int last_count = 0;
+        while (tasks_completed.load() < N) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            int current = tasks_completed.load();
+            if (current > last_count) {
+                std::cout << "Монитор: выполнено " << current << " из " << N << " задач\n";
+                last_count = current;
+            }
+        }
+
+        std::cout << "Монитор: все задачи выполнены\n";
+        completion_promise.set_value();
+        });
+
+    std::cout << "\nДемонстрация блокирующего поведения\n\n";
+
+    size_t long_idx = 0;
+    size_t bool_idx = 0;
+
+    for (int i = 0; i < N; i++) {
+        if (task_types[i] < 2) {
+            std::cout << "Ожидание результата от задачи " << i + 1 << " ("
+                << (task_types[i] == 0 ? "факториал" : "Фибоначчи")
+                << "(" << task_values[i] << "))\n";
+
+            long long result = long_futures[long_idx].get();
+            long_idx++;
+
+            std::cout << "Задача " << i + 1 << ": "
+                << (task_types[i] == 0 ? "факториал" : "Фибоначчи")
+                << "(" << task_values[i] << ") = " << result << "\n\n";
+        }
+        else {
+            std::cout << "Ожидание результата от задачи " << i + 1 << " (Простота("
+                << task_values[i] << "))\n";
+
+            bool result = bool_futures[bool_idx].get();
+            bool_idx++;
+
+            std::cout << "Задача " << i + 1 << ": Простота(" << task_values[i]
+                << ") = " << (result ? "простое" : "не простое") << "\n\n";
+        }
+    }
+
+    std::cout << "Все результаты получены\n";
+    std::cout << "Основной поток: ожидание сигнала от монитора\n";
+    completion_future.wait();
+    std::cout << "Основной поток: получен сигнал о завершении всех задач\n";
+
+    for (auto& t : threads) {
+        if (t.joinable()) {
+            t.join();
+        }
+    }
+
+    if (monitor_thread.joinable()) {
+        monitor_thread.join();
+    }
+
+    std::cout << "\nПрограмма завершена.\n";
+
+    system("pause");
+    return 0;
+}
