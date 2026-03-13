@@ -1,0 +1,42 @@
+
+#include <iostream>
+#include <thread>
+#include <chrono>
+#include <random>
+
+using namespace std;
+
+void printNumbers(int threadId) {
+    random_device rd;
+    mt19937 gen(rd());
+    uniform_int_distribution<> dis(200, 300);
+
+    for (int i = 1; i <= 5; ++i) {
+        
+        cout << "Поток " << threadId << ": " << i << endl;
+        this_thread::sleep_for(chrono::milliseconds(dis(gen)));
+    }
+}
+
+int main() {
+    setlocale(LC_ALL, "Russian");
+
+    cout << "Запуск" << endl;
+
+    thread t1(printNumbers, 1);
+    thread t2(printNumbers, 2);
+
+    cout << "Потоки созданы" << endl;
+
+    for (int i = 1; i <= 3; ++i) {
+        cout << "Сообщение " << i << endl;
+        this_thread::sleep_for(chrono::milliseconds(150));
+    }
+
+    t1.join();
+    t2.join();
+
+    cout << "Все потоки завершены." << endl;
+
+    return 0;
+}

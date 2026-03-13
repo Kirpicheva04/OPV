@@ -1,0 +1,51 @@
+#include <iostream>
+#include <thread>
+#include <chrono>
+#include <random>
+#include <mutex>
+
+using namespace std;
+mutex mtx;
+
+void printNumbers(int threadId, int delayMs) {
+    for (int i = 1; i <= 5; ++i) {
+        {
+            lock_guard<mutex> lock(mtx);
+            cout << "Поток " << threadId << ": " << i << endl;
+        }
+        this_thread::sleep_for(chrono::milliseconds(delayMs));
+    }
+    {
+        lock_guard<mutex> lock(mtx);
+        cout << "Поток " << threadId << " завершил работу" << endl;
+    }
+}
+
+int main() {
+    setlocale(LC_ALL, "Russian");
+    cout << "Запускаем потоки" << endl;
+
+    thread t1(printNumbers, 1, 200);
+    thread t2(printNumbers, 2, 800);
+
+    cout << "потоки созданы" << endl;
+    this_thread::sleep_for(chrono::milliseconds(50)); 
+
+    t1.detach();
+    cout << "Поток 1 отсоединён (detach)" << endl;
+
+    for (int i = 1; i <= 5; ++i) {
+        cout << "Работа потока " << i << endl;
+        this_thread::sleep_for(chrono::milliseconds(100));
+    }
+
+    cout << "Ожидаем завершения потока 2 (join)" << endl;
+    t2.join();
+
+    cout << "Дополнительная задержка" << endl;
+    this_thread::sleep_for(chrono::seconds(3));
+
+    cout << "Программа завершается" << endl;
+
+    return 0;
+}
