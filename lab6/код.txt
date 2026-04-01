@@ -1,0 +1,155 @@
+#include <omp.h>
+#include <opencv2/opencv.hpp>
+#include <iostream>
+#include <chrono>
+#include <vector>
+#include <iomanip>
+
+using namespace std;
+using namespace cv;
+
+const double X_MIN = -2.5;
+const double X_MAX = 1.0;
+const double Y_MIN = -1.5;
+const double Y_MAX = 1.5;
+
+const int WIDTH = 800;
+const int HEIGHT = 800;
+const int MAX_ITER = 200;
+
+inline int mandelbrotIterations(double c_real, double c_imag) {
+    double z_real = 0.0, z_imag = 0.0;
+    int iter = 0;
+
+    while (iter < MAX_ITER) {
+        double z_real2 = z_real * z_real;
+        double z_imag2 = z_imag * z_imag;
+
+        if (z_real2 + z_imag2 > 4.0) break;
+
+        double new_real = z_real2 - z_imag2 + c_real;
+        double new_imag = 2.0 * z_real * z_imag + c_imag;
+
+        z_real = new_real;
+        z_imag = new_imag;
+        iter++;
+    }
+
+    return iter;
+}
+
+inline Vec3b getColor(int iterations) {
+    if (iterations == MAX_ITER) {
+        return Vec3b(0, 0, 0); // Черный
+    }
+
+    double t = (double)iterations / MAX_ITER;
+    int r = (int)(9 * (1 - t) * t * t * t * 255);
+    int g = (int)(15 * (1 - t) * (1 - t) * t * t * 255);
+    int b = (int)(8.5 * (1 - t) * (1 - t) * (1 - t) * t * 255);
+
+    return Vec3b(b, g, r);
+}
+
+void computeMandelbrotSequential(Mat& image) {
+    double step_x = (X_MAX - X_MIN) / WIDTH;
+    double step_y = (Y_MAX - Y_MIN) / HEIGHT;
+
+    for (int y = 0; y < HEIGHT; y++) {
+        double c_imag = Y_MAX - y * step_y;
+        Vec3b* row = image.ptr<Vec3b>(y);
+
+        for (int x = 0; x < WIDTH; x++) {
+            double c_real = X_MIN + x * step_x;
+            int iterations = mandelbrotIterations(c_real, c_imag);
+            row[x] = getColor(iterations);
+        }
+
+        if (y % 50 == 0) {
+            cout << "\rПоследовательно: " << (y * 100 / HEIGHT) << "%" << flush;
+        }
+    }
+    cout << "\rПоследовательно: 100%                      " << endl;
+}
+
+
+void computeMandelbrotParallel(Mat& image, int num_threads) {
+    omp_set_num_threads(num_threads);
+
+    double step_x = (X_MAX - X_MIN) / WIDTH;
+    double step_y = (Y_MAX - Y_MIN) / HEIGHT;
+
+#pragma omp parallel for schedule(static)
+    for (int y = 0; y < HEIGHT; y++) {
+        double c_imag = Y_MAX - y * step_y;
+        Vec3b* row = image.ptr<Vec3b>(y);
+
+        for (int x = 0; x < WIDTH; x++) {
+            double c_real = X_MIN + x * step_x;
+            int iterations = mandelbrotIterations(c_real, c_imag);
+            row[x] = getColor(iterations);
+        }
+
+#pragma omp critical
+        {
+            if (y % 50 == 0) {
+                cout << "\rПараллельно (" << num_threads << "): " << (y * 100 / HEIGHT) << "%" << flush;
+            }
+        }
+    }
+    cout << "\rПараллельно (" << num_threads << "): 100%                      " << endl;
+}
+
+int main() {
+    setlocale(LC_ALL, "Russian");
+
+    cout << "=== МНОЖЕСТВО МАНДЕЛЬБРОТА ===" << endl;
+    cout << "Размер: " << WIDTH << "x" << HEIGHT << endl;
+    cout << "Макс. итераций: " << MAX_ITER << endl;
+    cout << "Область: x=[" << X_MIN << ", " << X_MAX
+        << "], y=[" << Y_MIN << ", " << Y_MAX << "]" << endl;
+    cout << "================================\n" << endl;
+
+    cout << "1. Последовательные вычисления..." << endl;
+    Mat image_seq(HEIGHT, WIDTH, CV_8UC3);
+
+    auto start_seq = chrono::high_resolution_clock::now();
+    computeMandelbrotSequential(image_seq);
+    auto end_seq = chrono::high_resolution_clock::now();
+
+    double time_seq = chrono::duration<double>(end_seq - start_seq).count();
+    cout << "Время: " << fixed << setprecision(2) << time_seq << " сек" << endl << endl;
+
+    cout << "Показываем результат..." << endl;
+    namedWindow("Множество Мандельброта", WINDOW_NORMAL);
+    resizeWindow("Множество Мандельброта", 800, 800);
+    imshow("Множество Мандельброта", image_seq);
+
+    imwrite("mandelbrot_result.png", image_seq);
+    cout << "Изображение сохранено в 'mandelbrot_result.png'" << endl << endl;
+
+    cout << "2. Параллельные вычисления (сравнение времени):" << endl;
+
+    vector<int> threads = { 2, 4, 6 };
+
+    for (int t : threads) {
+        Mat image_par(HEIGHT, WIDTH, CV_8UC3);
+
+        auto start_par = chrono::high_resolution_clock::now();
+        computeMandelbrotParallel(image_par, t);
+        auto end_par = chrono::high_resolution_clock::now();
+
+        double time_par = chrono::duration<double>(end_par - start_par).count();
+        double speedup = time_seq / time_par;
+
+        cout << "Потоков: " << t << " | Время: " << fixed << setprecision(2)
+            << time_par << " сек | Ускорение: " << fixed << setprecision(2)
+            << speedup << "x" << endl;
+
+        imwrite("Результат" + to_string(t) + ".png", image_par);
+    }
+
+    waitKey(0);
+
+    return 0;
+}
